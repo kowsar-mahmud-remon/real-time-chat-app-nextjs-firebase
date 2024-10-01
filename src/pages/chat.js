@@ -1,100 +1,102 @@
 import { useEffect, useState } from "react";
 import { getAuth, signOut } from "firebase/auth";
-import { collection, doc, getDoc, onSnapshot, addDoc, serverTimestamp, getDocs } from "firebase/firestore";
-import { db } from "../components/firebase"; // Make sure this path points to your firebase config
+import { doc, getDoc, updateDoc, onSnapshot, serverTimestamp, addDoc, collection, arrayUnion } from "firebase/firestore";
+import { db } from "../components/firebase";  // Your Firebase configuration file
 
 const Chat = () => {
   const [user, setUser] = useState(null);
   const [messages, setMessages] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [newMessage, setNewMessage] = useState("");
+  const [conversationId, setConversationId] = useState(null);
 
-  // Get the current authenticated user
+  // Get the authenticated user
   useEffect(() => {
     const auth = getAuth();
     const currentUser = auth.currentUser;
     if (currentUser) {
       setUser(currentUser);
       checkIfAdmin(currentUser);
+      fetchConversation(currentUser.uid);
     } else {
       console.error("User not authenticated");
     }
   }, []);
 
-  // Function to check if the user is an admin
+  // Check if the authenticated user is an admin
   const checkIfAdmin = async (user) => {
     const docRef = doc(db, "roles", user.uid);
     const docSnap = await getDoc(docRef);
 
+    console.log("Role document: ", docSnap.data());
+
+
+
     if (docSnap.exists()) {
-      if (docSnap.data().role === 'admin') {
-        setIsAdmin(true);
-      } else {
-        setIsAdmin(false);
-      }
+      setIsAdmin(docSnap.data().role === 'admin');
     } else {
       setIsAdmin(false);
     }
   };
 
-  // Function to fetch messages and their responses
-  useEffect(() => {
-    const unsubscribe = onSnapshot(collection(db, 'conversations'), async (snapshot) => {
-      const chatData = await Promise.all(
-        snapshot.docs.map(async (doc) => {
-          const responseSnapshot = await getDocs(collection(db, 'conversations', doc.id, 'responses'));
-          const responses = responseSnapshot.docs.map(resDoc => resDoc.data());
+  // Fetch the conversation for the current user or admin
+  const fetchConversation = async (userId) => {
+    const conversationRef = doc(db, "conversations", userId);
+    const conversationSnap = await getDoc(conversationRef);
 
-          return {
-            id: doc.id,
-            data: {
-              ...doc.data(),
-              responses,
-            }
-          };
-        })
-      );
-      setMessages(chatData);
-    });
+    if (conversationSnap.exists()) {
+      setConversationId(userId);
+      // Listen for real-time updates to the conversation
+      onSnapshot(conversationRef, (doc) => {
+        setMessages(doc.data().messages || []);
+      });
+    } else {
+      // Create a new conversation document for the user if it doesn't exist
+      const newConversation = await addDoc(collection(db, "conversations"), {
+        userId: userId,
+        messages: [],
+      });
+      setConversationId(newConversation.id);
+    }
+  };
 
-    return () => unsubscribe();
-  }, []);
 
   // Function to send a new message
   const sendMessage = async () => {
-    if (!newMessage.trim()) return;
+    if (!newMessage.trim() || !conversationId) return;
 
-    await addDoc(collection(db, "conversations"), {
-      userName: user.displayName,
-      userImage: user.photoURL,
-      userMessage: newMessage,
-      timestamp: serverTimestamp(),
+    // First, create the message object without the timestamp
+    const messageData = {
+      senderId: user.uid,
+      senderName: user.displayName || "Unknown",
+      message: newMessage,
+      timestamp: null  // Temporarily set timestamp as null
+    };
+
+    // Now, update the conversation by adding the message and setting the server timestamp in two steps
+    const conversationRef = doc(db, "conversations", conversationId);
+
+    // First, append the message without timestamp
+    await updateDoc(conversationRef, {
+      messages: arrayUnion(messageData)  // Add the message without timestamp
     });
 
-    setNewMessage("");
-  };
-
-  // Function to respond to a message as an admin
-  const respondToMessage = async (conversationId) => {
-    const response = prompt("Enter your response:");
-    if (!response) return;
-
-    await addDoc(collection(db, 'conversations', conversationId, 'responses'), {
-      adminName: user.displayName,
-      adminImage: user.photoURL,
-      message: response,
-      timestamp: serverTimestamp(),
+    // Then, update the timestamp of the last message
+    await updateDoc(conversationRef, {
+      [`messages.${messageData.message}`]: serverTimestamp()  // Set the server timestamp separately
     });
+
+    setNewMessage("");  // Clear the input after sending the message
   };
 
 
   return (
     <div>
       <header>
-        <h1>Chat App</h1>
+        <h1>Chat</h1>
         {user && (
           <>
-            <p>Welcome {user.displayName}</p>
+            <p>Welcome, {user.displayName}</p>
             <button onClick={() => signOut(getAuth())}>Logout</button>
           </>
         )}
@@ -102,56 +104,45 @@ const Chat = () => {
 
       <main>
         <div>
-          {/* Render Messages */}
-          {messages.map(({ id, data }) => (
-            <div key={id} className="message">
-              <img src={data.userImage} alt="user avatar" width="30" />
-              <strong>{data.userName}:</strong> {data.userMessage}
+          {/* Chat Thread */}
+          <div className="chat-thread">
+            {messages.map((msg, index) => (
+              <div key={index} className={`message ${msg.senderId === user.uid ? "user-message" : "admin-message"}`}>
+                <strong>{msg.senderName}:</strong> {msg.message}
+                <small>{new Date(msg.timestamp?.toDate()).toLocaleString()}</small>
+              </div>
+            ))}
+          </div>
 
-              {/* Only admins can reply */}
-              {isAdmin && (
-                <button onClick={() => respondToMessage(id)}>Reply as Admin</button>
-              )}
-
-              {/* Render Admin Responses */}
-              {data.responses && data.responses.length > 0 && (
-                <div>
-                  <h4>Admin Responses:</h4>
-                  {data.responses.map((response, idx) => (
-                    <div key={idx} className="response">
-                      <img src={response.adminImage} alt="admin avatar" width="30" />
-                      <strong>{response.adminName}:</strong> {response.message}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Input Field for Sending New Messages (for regular users) */}
-        {!isAdmin && (
+          {/* Send Message Input */}
           <div>
             <input
               type="text"
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type your message..."
+              placeholder="Type a message..."
             />
             <button onClick={sendMessage}>Send</button>
           </div>
-        )}
+        </div>
       </main>
 
       <style jsx>{`
-        .message {
+        .chat-thread {
+          max-height: 400px;
+          overflow-y: auto;
           border: 1px solid #ccc;
           padding: 10px;
+          margin-bottom: 20px;
+        }
+        .message {
           margin-bottom: 10px;
         }
-        .response {
-          margin-left: 20px;
-          margin-top: 10px;
+        .user-message {
+          background-color: #d1ffd1;
+        }
+        .admin-message {
+          background-color: #ffd1d1;
         }
       `}</style>
     </div>
