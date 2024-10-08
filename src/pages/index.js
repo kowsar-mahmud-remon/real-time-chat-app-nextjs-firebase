@@ -43,12 +43,13 @@ export default function Home() {
     });
   };
 
+
   if (loading) {
     return <div>Loading...</div>; // Show a loading spinner while role is being checked
   }
 
   return (
-    <div>
+    <div className="bg-white text-black px-10 pt-10">
       {!user ? (
         <button onClick={handleLogin}>Login with Google</button>
       ) : (

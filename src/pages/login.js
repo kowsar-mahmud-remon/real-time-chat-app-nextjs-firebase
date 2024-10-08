@@ -18,6 +18,7 @@ export default function Login({ setIsAdmin }) {
     }
   };
 
+
   const checkIfAdmin = async (user) => {
     const docRef = doc(db, "roles", user.uid);
     const docSnap = await getDoc(docRef);
