@@ -36,3 +36,39 @@ export default function Login({ setIsAdmin }) {
     </div>
   );
 }
+
+
+// firebase code
+
+
+// rules_version = '2';
+
+// service cloud.firestore {
+//   match /databases/{database}/documents {
+
+//     // Conversations collection rules
+//     match /conversations/{conversationId} {
+
+//       // Allow the owner of the conversation (user) to read and update their own conversation
+//       allow read, update: if request.auth != null && request.auth.uid == conversationId;
+
+//       // Allow admins to read and update any conversation
+//       allow read, update: if request.auth != null && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == "admin";
+
+//       // Allow authenticated users to create new conversations (tied to their user ID)
+//       allow create: if request.auth != null && request.auth.uid == conversationId;
+
+//       // Allow only admins to delete conversations
+//       allow delete: if get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == "admin";
+//     }
+
+//     // Roles collection rules for managing user roles
+//     match /roles/{userId} {
+//       // Allow users to read their own role document (for checking admin status)
+//       allow read: if request.auth != null && request.auth.uid == userId;
+
+//       // Only allow admins to write/update roles (e.g., assign admin role)
+//       allow write: if get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == "admin";
+//     }
+//   }
+// }
